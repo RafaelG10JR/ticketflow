@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TicketFlow</title>
+<style>
+:root{--rojo:#a32a29;--oro:#b8860b;--fondo:#f6f4ef;--tinta:#2b2b2b;--borde:#ddd8cc;--blanco:#fff}
+*{box-sizing:border-box}
+body{margin:0;font-family:Georgia,serif;background:var(--fondo);color:var(--tinta)}
+button,input,select,textarea{font:inherit}
+header{background:var(--rojo);color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:5px solid var(--oro)}
+header h1{margin:0;font-size:22px}
+main{max-width:900px;margin:24px auto;padding:0 16px}
+.btn{background:var(--rojo);color:#fff;border:0;padding:9px 16px;border-radius:4px;cursor:pointer}
+.btn.sec{background:transparent;color:var(--rojo);border:1px solid var(--rojo)}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--oro);outline-offset:2px}
+input,select,textarea{padding:9px;border:1px solid var(--borde);border-radius:4px;background:#fff;width:100%}
+#login{max-width:340px;margin:12vh auto;background:#fff;padding:28px;border-top:5px solid var(--oro);display:flex;flex-direction:column;gap:12px}
+#login h2{margin:0;color:var(--rojo)}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{flex:1}
+.tabs .on{background:var(--rojo);color:#fff}
+form{display:grid;gap:8px;background:#fff;padding:16px;border-left:5px solid var(--oro);margin-bottom:20px}
+.fila{display:flex;gap:8px}
+.item{background:#fff;border:1px solid var(--borde);padding:12px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.item small{color:#777;display:block}
+.alta{border-left:5px solid var(--rojo)}.media{border-left:5px solid var(--oro)}.baja{border-left:5px solid #7a9a6a}
+.hecha span{text-decoration:line-through;color:#888}
+.vacio{text-align:center;color:#777;padding:24px}
+.acciones{display:flex;gap:6px;align-items:center}
+.acciones select{width:auto}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h2>TicketFlow</h2>
+  <input id="user" placeholder="Usuario" autocomplete="username">
+  <input id="pass" type="password" placeholder="Contraseña" autocomplete="current-password">
+  <button class="btn" onclick="login()">Entrar</button>
+  <button class="btn sec" onclick="registro()">Crear cuenta</button>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>TicketFlow · <span id="nombre"></span></h1>
+    <button class="btn sec" style="color:#fff;border-color:#fff" onclick="salir()">Salir</button>
+  </header>
+  <main>
+    <div class="tabs">
+      <button class="btn on" id="tabT" onclick="vista('tickets')">Tickets</button>
+      <button class="btn sec" id="tabK" onclick="vista('tareas')">Tareas</button>
+    </div>
+
+    <section id="vTickets">
+      <form onsubmit="crearTicket(event)">
+        <input id="tTitulo" placeholder="Título del ticket" required>
+        <textarea id="tDesc" placeholder="Describe el problema" rows="2"></textarea>
+        <div class="fila">
+          <select id="tPrio"><option value="baja">Prioridad baja</option><option value="media" selected>Prioridad media</option><option value="alta">Prioridad alta</option></select>
+          <button class="btn">Crear ticket</button>
+        </div>
+      </form>
+      <div id="listaTickets"></div>
+    </section>
+
+    <section id="vTareas" style="display:none">
+      <form onsubmit="crearTarea(event)">
+        <input id="kTitulo" placeholder="Nueva tarea" required>
+        <div class="fila">
+          <select id="kTicket"><option value="">Sin ticket asociado</option></select>
+          <button class="btn">Agregar tarea</button>
+        </div>
+      </form>
+      <div id="listaTareas"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+let token = localStorage.getItem("token");
+let tickets = [];
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(url, method = "GET", body) {
+  const res = await fetch(url, {
+    method,
+    headers: {"Content-Type": "application/json", ...(token ? {Authorization: "Bearer " + token} : {})},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (res.status === 401 && token) { salir(); return null; }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Error");
+  return data;
+}
+
+// AUTH
+async function login() {
+  try {
+    const d = await api("/login", "POST", {username: user.value, password: pass.value});
+    token = d.token;
+    localStorage.setItem("token", token);
+    localStorage.setItem("username", d.username);
+    entrar();
+  } catch (e) { alert(e.message); }
+}
+async function registro() {
+  try { await api("/registro", "POST", {username: user.value, password: pass.value}); alert("Cuenta creada. Ya puedes entrar."); }
+  catch (e) { alert(e.message); }
+}
+function salir() { localStorage.clear(); token = null; location.reload(); }
+function entrar() {
+  document.getElementById("login").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  document.getElementById("nombre").textContent = localStorage.getItem("username");
+  cargarTickets().then(cargarTareas);
+}
+
+// VISTAS
+function vista(v) {
+  const t = v === "tickets";
+  vTickets.style.display = t ? "block" : "none";
+  vTareas.style.display = t ? "none" : "block";
+  tabT.className = "btn " + (t ? "on" : "sec");
+  tabK.className = "btn " + (t ? "sec" : "on");
+}
+
+// TICKETS
+async function cargarTickets() {
+  tickets = await api("/tickets") || [];
+  kTicket.innerHTML = '<option value="">Sin ticket asociado</option>' +
+    tickets.map(t => `<option value="${t._id}">${esc(t.titulo)}</option>`).join("");
+  listaTickets.innerHTML = tickets.length ? tickets.map(t => `
+    <div class="item ${t.prioridad}">
+      <div><b>${esc(t.titulo)}</b><small>${esc(t.descripcion)}</small></div>
+      <div class="acciones">
+        <select onchange="estadoTicket('${t._id}',this.value)">
+          ${["abierto","en_proceso","cerrado"].map(e => `<option value="${e}" ${t.estado===e?"selected":""}>${e.replace("_"," ")}</option>`).join("")}
+        </select>
+        <button class="btn sec" onclick="borrarTicket('${t._id}')">Eliminar</button>
+      </div>
+    </div>`).join("") : '<div class="vacio">Aún no tienes tickets. Crea el primero arriba.</div>';
+}
+async function crearTicket(e) {
+  e.preventDefault();
+  try {
+    await api("/tickets", "POST", {titulo: tTitulo.value, descripcion: tDesc.value, prioridad: tPrio.value});
+    tTitulo.value = tDesc.value = "";
+    cargarTickets();
+  } catch (err) { alert(err.message); }
+}
+async function estadoTicket(id, estado) { await api("/tickets/" + id, "PUT", {estado}); }
+async function borrarTicket(id) {
+  if (!confirm("¿Eliminar ticket y sus tareas?")) return;
+  await api("/tickets/" + id, "DELETE");
+  await cargarTickets(); cargarTareas();
+}
+
+// TAREAS
+async function cargarTareas() {
+  const tareas = await api("/tareas") || [];
+  listaTareas.innerHTML = tareas.length ? tareas.map(t => `
+    <div class="item ${t.completada ? "hecha" : ""}">
+      <label><input type="checkbox" style="width:auto" ${t.completada ? "checked" : ""} onchange="marcar('${t._id}',this.checked)">
+        <span>${esc(t.titulo)}</span>
+        ${t.ticket ? `<small>Ticket: ${esc(t.ticket.titulo)}</small>` : ""}
+      </label>
+      <button class="btn sec" onclick="borrarTarea('${t._id}')">Eliminar</button>
+    </div>`).join("") : '<div class="vacio">No hay tareas pendientes.</div>';
+}
+async function crearTarea(e) {
+  e.preventDefault();
+  try {
+    await api("/tareas", "POST", {titulo: kTitulo.value, ticket: kTicket.value});
+    kTitulo.value = "";
+    cargarTareas();
+  } catch (err) { alert(err.message); }
+}
+async function marcar(id, completada) { await api("/tareas/" + id, "PUT", {completada}); cargarTareas(); }
+async function borrarTarea(id) { await api("/tareas/" + id, "DELETE"); cargarTareas(); }
+
+if (token) entrar();
+</script>
+</body>
+</html>
